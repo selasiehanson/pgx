@@ -469,6 +469,97 @@ module Make_tests (IO : Pgx.IO) = struct
               | _ -> assert false))
           >>| List.iter (fun () -> ())
         )
+      ; "UTF-8 partial round-trip 1", (fun () ->
+          (* Select a literal string *)
+          let expect = "test-ä-test" in
+          with_conn (fun db ->
+            simple_query db {|
+                CREATE TEMPORARY TABLE this_test (id text);
+                INSERT INTO this_test (id) VALUES ('test-ä-test')
+              |}
+            >>= fun _ ->
+            execute db "SELECT id FROM this_test"
+            >>| function
+            | [[ result ]] -> assert_equal (Some expect) (Pgx.Value.to_string result)
+            | _ -> assert false
+          )
+        )
+      ; "UTF-8 partial round-trip 1 with where", (fun () ->
+          (* Select a literal string *)
+          let expect = "test-ä-test" in
+          with_conn (fun db ->
+            simple_query db {|
+                  CREATE TEMPORARY TABLE this_test (id text);
+                  INSERT INTO this_test (id) VALUES ('test-ä-test')
+                |}
+            >>= fun _ ->
+            execute db ~params:[ Pgx.Value.of_string expect ]
+              "SELECT id FROM this_test WHERE id = $1"
+            >>| function
+            | [[ result ]] -> assert_equal (Some expect) (Pgx.Value.to_string result)
+            | [] -> assert_failure "Expected one row but got zero"
+            | _ -> assert false
+          )
+        )
+      ; "UTF-8 partial round-trip 2", (fun () ->
+          (* Insert string as a param, then select back the contents of
+             the table *)
+          let expect = "test-ä-test" in
+          with_conn (fun db ->
+            simple_query db "CREATE TEMPORARY TABLE this_test (id text)"
+            >>= fun _ ->
+            execute db ~params:[ Pgx.Value.of_string expect]
+              "INSERT INTO this_test (id) VALUES ($1)"
+            >>= fun _ ->
+            execute db "SELECT id FROM this_test"
+            >>| function
+            | [[ result ]] -> assert_equal (Some expect) (Pgx.Value.to_string result)
+            | _ -> assert false
+          )
+        )
+      ; "UTF-8 partial round-trip 3", (fun () ->
+          with_conn (fun db ->
+            simple_query db {|
+              CREATE TEMPORARY TABLE this_test (id text);
+              INSERT INTO this_test (id) VALUES('test-\303\244-test')
+            |}
+            >>= fun _ ->
+            execute db "SELECT id FROM this_test"
+            >>| function
+            | [[ result ]] ->
+              assert_equal ~printer:(fun s -> s)
+                {|test-\303\244-test|} (Pgx.Value.to_string_exn result)
+            | _ -> assert false
+          )
+        )
+      ; "UTF-8 round-trip", (fun () ->
+          (* Select the contents of a param *)
+          let expect = "test-ä-test" in
+          with_conn (fun db ->
+            execute db ~params:[ Pgx.Value.of_string expect ]
+              "SELECT $1::VARCHAR"
+            >>| function
+            | [[ result ]] -> assert_equal (Some expect) (Pgx.Value.to_string result)
+            | _ -> assert false
+          )
+        )
+      ; "UTF-8 round-trip where", (fun () ->
+          (* Insert string as a param, then select back the contents of
+             the table using a WHERE *)
+          let expect = "test-ä-test" in
+          with_conn (fun db ->
+            simple_query db "CREATE TEMPORARY TABLE this_test (id text)"
+            >>= fun _ ->
+            execute db ~params:[ Pgx.Value.of_string expect]
+              "INSERT INTO this_test (id) VALUES ($1)"
+            >>= fun _ ->
+            execute db ~params:[ Pgx.Value.of_string expect]
+              "SELECT id FROM this_test WHERE id = $1"
+            >>| function
+            | [[ result ]] -> assert_equal (Some expect) (Pgx.Value.to_string result)
+            | _ -> assert false
+          )
+        )
       ] in
     make_tests "pgx_async" tests
     >>| run_test_tt_main ~exit
